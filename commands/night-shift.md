@@ -1,5 +1,5 @@
 ---
-description: Autonomous Night Shift mode - Executes tasks from tasks.md in strict order with GitHub Issue linking
+description: Autonomous Night Shift mode - Executes tasks, creates PR, and handles AI review feedback (3 cycles default)
 ---
 
 # 🌙 Night Shift Command
@@ -18,6 +18,9 @@ Night Shift mode operates **completely unsupervised and autonomously**, automati
 - Implementing with TDD cycle
 - Committing and pushing changes
 - Creating PR when complete
+- **Handling AI review feedback (default: 3 cycles)**
+- Auto-validating and fixing review comments
+- Triggering re-reviews until complete
 
 **CRITICAL AUTONOMOUS EXECUTION RULES:**
 
@@ -33,6 +36,7 @@ Night Shift mode operates **completely unsupervised and autonomously**, automati
    - **Manual implementation is PROHIBITED** - Always delegate to agents
 6. **ONLY STOP WHEN**:
    - All tasks in tasks.md are checked `[x]`
+   - PR created and auto-review cycles complete (default: 3 cycles)
    - Max-tasks limit reached (if specified)
    - Unrecoverable error occurs
 
@@ -183,6 +187,8 @@ If tests pass:
 ### 8. FINISH & PR
 When all tasks are checked:
 
+**Step 8.1: Create Pull Request**
+
 ```bash
 gh pr create \
   --repo hy-sksem/everything-claude-code \
@@ -200,6 +206,202 @@ All tests passing ✓
 ## Review Notes
 [Any important notes or warnings]
 "
+
+# Capture PR number for auto-review cycles
+PR_NUMBER=$(gh pr view --json number -q .number)
+```
+
+**Step 8.2: Auto-Review Cycles (Default - Enabled)**
+
+**IMPORTANT: This step runs BY DEFAULT with 3 cycles. Only skipped if `--skip-auto-review` or `--auto-review-cycles 0` is specified.**
+
+By default (or if `--auto-review-cycles N` is specified), automatically handle AI review feedback:
+
+```bash
+# Example: /night-shift (runs with default 3 cycles)
+# Or: /night-shift --auto-review-cycles 5 (custom cycles)
+
+# After PR creation, run automated review-response cycles
+# N = 3 by default, or value from --auto-review-cycles argument
+for cycle in {1..N}; do
+  echo "🔄 Auto-Review Cycle $cycle/$N"
+
+  # Wait for AI reviews (Gemini/Copilot/Claude)
+  # Polls every 2-3 minutes, timeout after 15 minutes
+
+  # Trigger initial review
+  if [ $cycle -eq 1 ]; then
+    gh pr comment $PR_NUMBER --body "/gemini review"
+    sleep 180  # Wait 3 minutes for first review
+  fi
+
+  # Check for new reviews
+  NEW_REVIEWS=$(gh pr view $PR_NUMBER --json reviews | jq '.reviews | length')
+
+  if [ "$NEW_REVIEWS" -eq 0 ] || [ "$NEW_REVIEWS" -eq "$PREV_REVIEWS" ]; then
+    # No new reviews, wait and poll
+    for wait in {1..5}; do
+      sleep 120  # Wait 2 minutes
+      NEW_REVIEWS=$(gh pr view $PR_NUMBER --json reviews | jq '.reviews | length')
+      if [ "$NEW_REVIEWS" -gt "$PREV_REVIEWS" ]; then
+        break  # New reviews detected
+      fi
+    done
+
+    # If still no new reviews after 15 min total, exit loop
+    if [ "$NEW_REVIEWS" -eq "$PREV_REVIEWS" ]; then
+      echo "⏸️ No new reviews after 15 minutes, stopping"
+      break
+    fi
+  fi
+
+  PREV_REVIEWS=$NEW_REVIEWS
+
+  # Validate and respond to reviews automatically
+  # This uses the /review-pr --auto logic internally
+
+  1. Fetch all review comments from PR
+  2. For each comment, AI validates correctness:
+     - Read actual code at specified location
+     - Assess if review is technically accurate
+     - Categorize: VALID, INVALID, UNCLEAR, OUT_OF_SCOPE
+
+  3. Auto-fix VALID CRITICAL/HIGH issues:
+     - Launch appropriate agents (security-reviewer, tdd-guide, etc.)
+     - Implement fixes
+     - Verify build and tests pass
+     - Commit with detailed message
+     - Push changes
+
+  4. Skip INVALID/UNCLEAR reviews:
+     - Document why in commit message
+     - Create GitHub issues for OUT_OF_SCOPE items
+
+  5. Trigger next review cycle:
+     - gh pr comment --body "/gemini review"
+     - Continue to next iteration
+
+  6. Exit conditions:
+     - Max cycles reached
+     - No VALID reviews to address
+     - Build or tests fail (requires manual intervention)
+done
+
+echo "✅ Auto-review cycles complete"
+```
+
+**Auto-Review Cycle Logic:**
+
+```
+Cycle 1:
+  → Wait for AI reviews (15 min timeout)
+  → AI validates each review (read actual code)
+  → Auto-fix VALID CRITICAL/HIGH
+  → Commit, push, trigger re-review
+
+Cycle 2:
+  → Wait for new reviews
+  → Validate new comments
+  → Auto-fix VALID issues
+  → Commit, push, trigger re-review
+
+Cycle 3:
+  → Wait for new reviews
+  → Validate new comments
+  → Auto-fix if any VALID
+  → Or exit if max cycles reached
+
+Exit when:
+  - Cycle count reaches N
+  - No new reviews after 15 min
+  - No VALID reviews to fix
+  - Build/test failure
+```
+
+**Validation Criteria (Same as /review-pr --auto):**
+
+For each review comment, AI reads the actual code and checks:
+1. **Technical Accuracy**: Is the issue real?
+2. **Code Context**: Does it apply to current code?
+3. **Scope**: Should it be in this PR?
+4. **Priority**: Is severity justified?
+
+**Outcomes:**
+- ✅ VALID → Auto-fix
+- ❌ INVALID → Skip (document reason)
+- ⚠️ UNCLEAR → Skip in auto mode
+- 📋 OUT_OF_SCOPE → Create issue, skip in PR
+
+**Example Output:**
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌙 Night Shift Complete - Starting Auto-Review
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ All tasks implemented and committed
+✅ PR #789 created
+🔄 Auto-review cycles: 3
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔄 Auto-Review Cycle 1/3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⏳ Triggering /gemini review...
+⏳ Waiting for reviews (max 15 min)...
+📋 Received 5 review comments
+
+🤖 Validating reviews:
+  ✅ 3 VALID (CRITICAL/HIGH)
+  ❌ 1 INVALID (code already correct)
+  📋 1 OUT_OF_SCOPE (issue #790 created)
+
+🔧 Fixing 3 validated issues:
+  ✓ Security: XSS fixed (security-reviewer)
+  ✓ Tests: Coverage 78% → 91% (tdd-guide)
+  ✓ Performance: Query optimized (code-reviewer)
+
+✅ Committed and pushed
+✅ /gemini review triggered
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔄 Auto-Review Cycle 2/3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⏳ Waiting for new reviews...
+📋 Received 2 new review comments
+
+🤖 Validating:
+  ✅ 2 VALID (HIGH)
+
+🔧 Fixing 2 issues:
+  ✓ Error handling improved
+  ✓ Edge case handled
+
+✅ Committed and pushed
+✅ /gemini review triggered
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔄 Auto-Review Cycle 3/3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⏳ Waiting for new reviews...
+⏸️ No new reviews after 15 minutes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Night Shift + Auto-Review Complete!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 Final Summary:
+- Tasks completed: 12
+- PR created: #789
+- Review cycles: 2 (stopped early, no new reviews)
+- Issues fixed: 5
+- Issues created: 1 (#790)
+- Build: ✅ Passing
+- Tests: ✅ Passing (91% coverage)
+
+🔗 PR ready for final review: https://github.com/.../pull/789
 ```
 
 ## Safety Guards
@@ -408,6 +610,8 @@ $ARGUMENTS:
   - `standard`: tdd-guide + code-reviewer (default)
   - `thorough`: planner + tdd-guide + code-reviewer + security-reviewer
 - `--interactive` - Enable confirmation prompts between tasks (NOT RECOMMENDED for night shift)
+- `--auto-review-cycles N` - After PR creation, automatically handle AI review feedback for N cycles (default: 3)
+- `--skip-auto-review` - Disable automatic review cycles (only create PR without handling reviews)
 
 ## Examples
 
@@ -449,6 +653,45 @@ $ARGUMENTS:
 /night-shift --no-agents
 ```
 
+### Standard Usage (Full Automation - Default)
+```bash
+# Complete automation: implement tasks + handle reviews (3 cycles by default)
+/night-shift
+
+# High-quality mode with auto-review (default 3 cycles)
+/night-shift --quality-mode thorough
+
+# Custom number of review cycles
+/night-shift --auto-review-cycles 5
+
+# Limited tasks with default review cycles
+/night-shift --max-tasks 5
+
+# This will:
+# 1. Implement all tasks from tasks.md
+# 2. Create PR
+# 3. Wait for AI reviews (Gemini/Copilot/Claude)
+# 4. AI validates each review comment
+# 5. Auto-fix VALID CRITICAL/HIGH issues
+# 6. Commit, push, trigger re-review
+# 7. Repeat up to 3 times (default)
+# 8. Complete when max cycles reached or no more reviews
+```
+
+### Without Auto-Review (Manual PR Review)
+```bash
+# Skip automatic review handling
+/night-shift --skip-auto-review
+
+# Or explicitly set to 0 cycles
+/night-shift --auto-review-cycles 0
+
+# This will:
+# 1. Implement all tasks from tasks.md
+# 2. Create PR
+# 3. Stop (no automatic review handling)
+```
+
 ## Best Practices
 
 1. **Before Running**
@@ -456,16 +699,29 @@ $ARGUMENTS:
    - Ensure specs are up-to-date
    - Create GitHub Issues for tasks
    - Commit any pending work
+   - Enable repository rulesets for auto-review if using Copilot
 
 2. **During Execution**
    - Monitor progress periodically
    - Check test results
    - Review commits
+   - If using --auto-review-cycles, check AI validation decisions
 
 3. **After Completion**
    - Review the PR
    - Check all tests pass
    - Verify implementation quality
+   - If auto-review was used, validate that skipped reviews were correctly identified as INVALID
+
+4. **Auto-Review Cycles Best Practices (Enabled by Default)**
+   - Default 3 cycles provides thorough iteration
+   - First cycle usually catches most issues
+   - Subsequent cycles refine edge cases
+   - AI validation prevents fixing incorrect reviews
+   - Check created GitHub issues for OUT_OF_SCOPE items
+   - Monitor that INVALID reviews are genuinely incorrect
+   - Use `--skip-auto-review` only if you want to manually review the PR
+   - Increase cycles with `--auto-review-cycles 5` for very thorough review
 
 ## Integration with Agents
 
