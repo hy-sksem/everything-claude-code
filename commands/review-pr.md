@@ -22,7 +22,8 @@ Parse from $ARGUMENTS:
 - `--interactive`: Enable user confirmation mode
 - `--max-cycles N`: Repeat review-fix cycle up to N times (default: 1)
 - `--interactive-medium`: Auto-fix CRITICAL/HIGH, ask about MEDIUM/LOW
-- `--auto-merge`: Auto-merge PR when reviews are clean (off by default in standalone mode)
+- `--auto-merge`: Auto-merge PR when reviews are clean (off by default)
+- `--no-auto-merge`: Explicitly disable auto-merge (default behavior)
 
 ```bash
 /review-pr                          # Auto mode, current PR, 1 cycle
@@ -38,8 +39,12 @@ Parse from $ARGUMENTS:
 ### 1. Identify PR and Fetch Reviews
 
 ```bash
+# Parse pr-number from $ARGUMENTS (first positional argument)
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-PR_NUMBER=${1:-$(gh pr view --json number -q .number 2>/dev/null)}
+PR_NUMBER=$(echo "$ARGUMENTS" | awk '{print $1}')
+if [ -z "$PR_NUMBER" ]; then
+  PR_NUMBER=$(gh pr view --json number -q .number 2>/dev/null)
+fi
 ```
 
 If no PR found, inform user and exit.
@@ -188,15 +193,28 @@ while current_cycle <= max_cycles:
 **Only runs when `--auto-merge` flag is present.**
 
 ```bash
-# Check PR review status and CI
-PR_STATE=$(gh pr view $PR_NUMBER --json reviewDecision -q .reviewDecision)
-gh pr checks $PR_NUMBER
+# Check PR review decision and CI status
+REVIEW_DECISION=$(gh pr view $PR_NUMBER --json reviewDecision -q .reviewDecision)
+
+# Exit if not approved
+if [ "$REVIEW_DECISION" != "APPROVED" ]; then
+  echo "⏸️ PR not approved (state: $REVIEW_DECISION). Skipping auto-merge."
+  gh pr comment $PR_NUMBER --body "Auto-merge skipped: PR requires approval"
+  exit 0
+fi
+
+# Check CI status
+if ! gh pr checks $PR_NUMBER 2>/dev/null; then
+  echo "⏸️ CI checks failing. Skipping auto-merge."
+  gh pr comment $PR_NUMBER --body "Auto-merge skipped: CI checks failing"
+  exit 0
+fi
 ```
 
 **Merge if ALL conditions met:**
-- No unresolved review comments
+- `reviewDecision` is APPROVED
 - No pending CRITICAL/HIGH VALID reviews left unfixed
-- CI checks passing
+- CI checks passing (all green)
 - No merge conflicts
 
 ```bash

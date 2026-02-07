@@ -119,20 +119,33 @@ for cycle in 1..N (default 3):
   8. Exit when: max cycles, no new reviews after 10 min, no VALID issues, or build failure
 ```
 
-**Step 8.3: Auto-Merge PR (if reviews are clean)**
+**Step 8.3: Auto-Merge PR (default: enabled, unless --no-auto-merge)**
 
-After review cycles complete, check if PR is ready to merge:
+After review cycles complete, check if PR is ready to merge (skip if `--no-auto-merge` flag).
 
 ```bash
-# Check PR review status
-PR_STATE=$(gh pr view $PR_NUMBER --json reviewDecision -q .reviewDecision)
+# Check review decision and CI status
+REVIEW_DECISION=$(gh pr view $PR_NUMBER --json reviewDecision -q .reviewDecision)
 
-# Check if all CI checks pass
-gh pr checks $PR_NUMBER
+# Exit early if not approved
+if [ "$REVIEW_DECISION" != "APPROVED" ]; then
+  echo "⏸️ PR not approved (state: $REVIEW_DECISION). Skipping auto-merge."
+  gh pr comment $PR_NUMBER --body "Auto-merge skipped: PR requires approval"
+  # Continue to Step 8.4 without merging
+  return
+fi
+
+# Check if all CI checks pass (non-zero exit if failing)
+if ! gh pr checks $PR_NUMBER 2>/dev/null; then
+  echo "⏸️ CI checks failing. Skipping auto-merge."
+  gh pr comment $PR_NUMBER --body "Auto-merge skipped: CI checks failing"
+  # Continue to Step 8.4 without merging
+  return
+fi
 ```
 
 **Merge conditions (ALL must be true):**
-- No unresolved review comments (all addressed or INVALID)
+- `reviewDecision` is APPROVED
 - No pending CRITICAL/HIGH VALID reviews left unfixed
 - CI checks passing (build + tests green)
 - No merge conflicts
@@ -144,8 +157,7 @@ gh pr merge $PR_NUMBER --squash --delete-branch
 
 **If merge conditions NOT met:**
 - Document what's blocking in PR comment
-- Leave PR open for manual review
-- Log reason and complete Night Shift
+- Continue to Step 8.4 without merging
 
 **Step 8.4: Check for Remaining Tasks (after merge)**
 
@@ -266,5 +278,5 @@ Fuzzy match task names to issue titles by word overlap.
 ```bash
 git log --oneline --grep="feat(auto)"    # Track commits
 git diff HEAD~10 tasks.md                # Check progress
-npm test                                  # Verify tests
+npm test || yarn test || pnpm test       # Verify tests
 ```
