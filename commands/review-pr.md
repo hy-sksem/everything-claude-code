@@ -142,7 +142,7 @@ Skipped/Deferred:
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 EOF
 )"
-git push
+git push origin HEAD
 ```
 
 ### 8. Trigger Gemini Review

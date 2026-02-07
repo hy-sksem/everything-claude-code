@@ -69,7 +69,7 @@ Delegate ENTIRE TDD cycle to `tdd-guide` agent: tests first (RED) → implement 
 ### 7. COMPLETE & UPDATE
 1. Delete `CURRENT_TASK.md`
 2. Update tasks.md: `- [ ]` → `- [x]`
-3. Commit: `git add . && git commit -m "feat(auto): <Task> (Fixes #<N>)" && git push`
+3. Commit: `git add . && git commit -m "feat(auto): <Task> (Fixes #<N>)" && git push origin HEAD`
 4. Run `/compact` if context growing (every ~5 tasks)
 5. **IMMEDIATELY** loop back to step 1 (NO PAUSE)
 
